@@ -1,4 +1,4 @@
-const API_URL = "http://192.168.133.128:6003/api/v1";
+const API_URL = "https://planted-core-backend-service.onrender.com/api/v1";
 
 interface ApiResponse<T = unknown> {
   status: "success" | "error";
