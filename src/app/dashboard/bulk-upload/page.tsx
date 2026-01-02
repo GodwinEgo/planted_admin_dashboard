@@ -155,7 +155,7 @@ export default function BulkUploadPage() {
       // Parse devotionals
       const parsed: ParsedDevotional[] = devotionalsData.map((row: any) => {
         const title = row.title?.toString().trim() || "";
-        const reflectionQs = [];
+        const reflectionQs: string[] = [];
 
         // Parse reflection questions (columns like reflection1, reflection2, etc.)
         for (let i = 1; i <= 5; i++) {
