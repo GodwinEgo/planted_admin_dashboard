@@ -1,58 +1,84 @@
 "use client";
 
-import { AlertModal, Button, ConfirmModal, Modal } from "@/components/ui";
-import api from "@/lib/api";
+import { AlertModal, Button, ConfirmModal } from "@/components/ui";
+import api, {
+  type DayRelationship,
+  type StagedItem,
+  type StagedUpload,
+} from "@/lib/api";
 import {
   AlertTriangle,
+  Check,
   CheckCircle,
+  ChevronDown,
+  ChevronRight,
+  Clock,
   Download,
+  Eye,
   FileSpreadsheet,
+  Link2,
   Loader2,
+  RefreshCw,
+  Trash2,
   Upload,
   X,
+  XCircle,
 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import * as XLSX from "xlsx";
 
-interface ParsedDevotional {
-  title: string;
-  subtitle?: string;
-  bibleReference: string;
-  verseText: string;
-  content: string;
-  prayerPrompt?: string;
-  reflectionQuestions: string[];
-  audience: string;
-  publishDate: string;
-  tags: string[];
-  isActive: boolean;
-  // Quiz data (if provided)
-  quizTitle?: string;
-  quizQuestions?: {
-    question: string;
-    type: "MULTIPLE_CHOICE" | "TRUE_FALSE" | "FILL_BLANK";
-    options: string[];
-    correctAnswer: string;
-    points: number;
-  }[];
-}
+type SheetName =
+  | "memoryVerses"
+  | "keyLessons"
+  | "quizzes_5_8"
+  | "quizzes_9_12"
+  | "childrenDevotionals"
+  | "adultDevotionals";
 
-interface UploadResult {
-  success: boolean;
-  devotionalId?: string;
-  devotionalTitle?: string;
-  quizId?: string;
-  error?: string;
-}
+const SHEET_DISPLAY_NAMES: Record<SheetName, string> = {
+  memoryVerses: "Memory Verses",
+  keyLessons: "Key Lessons",
+  quizzes_5_8: "Quizzes (Ages 5-8)",
+  quizzes_9_12: "Quizzes (Ages 9-12)",
+  childrenDevotionals: "Children Devotionals",
+  adultDevotionals: "Adult Devotionals",
+};
 
 export default function BulkUploadPage() {
+  // Upload state
   const [file, setFile] = useState<File | null>(null);
-  const [parsedData, setParsedData] = useState<ParsedDevotional[]>([]);
-  const [parseError, setParseError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadResults, setUploadResults] = useState<UploadResult[]>([]);
-  const [showResultsModal, setShowResultsModal] = useState(false);
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Staged uploads list
+  const [stagedUploads, setStagedUploads] = useState<StagedUpload[]>([]);
+  const [isLoadingUploads, setIsLoadingUploads] = useState(true);
+
+  // Selected upload for review
+  const [selectedUpload, setSelectedUpload] = useState<StagedUpload | null>(null);
+  const [activeTab, setActiveTab] = useState<SheetName | "relationships">("memoryVerses");
+
+  // Sheet data with pagination
+  const [sheetItems, setSheetItems] = useState<StagedItem[]>([]);
+  const [sheetPage, setSheetPage] = useState(1);
+  const [sheetTotalPages, setSheetTotalPages] = useState(1);
+  const [isLoadingSheet, setIsLoadingSheet] = useState(false);
+
+  // Relationships
+  const [relationships, setRelationships] = useState<DayRelationship[]>([]);
+  const [relationshipsPage, setRelationshipsPage] = useState(1);
+  const [relationshipsTotalPages, setRelationshipsTotalPages] = useState(1);
+  const [isLoadingRelationships, setIsLoadingRelationships] = useState(false);
+  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
+
+  // Actions
+  const [isApproving, setIsApproving] = useState(false);
+  const [isRejecting, setIsRejecting] = useState(false);
+
+  // Modals
+  const [showConfirmApprove, setShowConfirmApprove] = useState(false);
+  const [showConfirmReject, setShowConfirmReject] = useState(false);
+  const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [alertModal, setAlertModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -60,17 +86,80 @@ export default function BulkUploadPage() {
     variant: "success" | "error";
   }>({ isOpen: false, title: "", message: "", variant: "success" });
 
+  // Load staged uploads on mount
+  useEffect(() => {
+    loadStagedUploads();
+  }, []);
+
+  // Load sheet data when tab or upload changes
+  useEffect(() => {
+    if (selectedUpload && activeTab !== "relationships") {
+      loadSheetData(selectedUpload._id, activeTab);
+    }
+  }, [selectedUpload, activeTab, sheetPage]);
+
+  // Load relationships when tab changes
+  useEffect(() => {
+    if (selectedUpload && activeTab === "relationships") {
+      loadRelationships(selectedUpload._id);
+    }
+  }, [selectedUpload, activeTab, relationshipsPage]);
+
+  const loadStagedUploads = async () => {
+    setIsLoadingUploads(true);
+    try {
+      const response = await api.getStagedUploads({ limit: 50 });
+      setStagedUploads(response.data?.data || []);
+    } catch (error) {
+      console.error("Failed to load staged uploads:", error);
+    } finally {
+      setIsLoadingUploads(false);
+    }
+  };
+
+  const loadSheetData = async (uploadId: string, sheet: SheetName) => {
+    setIsLoadingSheet(true);
+    try {
+      const response = await api.getStagedSheet(uploadId, sheet, {
+        page: sheetPage,
+        limit: 50,
+      });
+      if (response.data) {
+        setSheetItems(response.data.items || []);
+        setSheetTotalPages(response.data.totalPages || 1);
+      }
+    } catch (error) {
+      console.error("Failed to load sheet data:", error);
+    } finally {
+      setIsLoadingSheet(false);
+    }
+  };
+
+  const loadRelationships = async (uploadId: string) => {
+    setIsLoadingRelationships(true);
+    try {
+      const response = await api.getStagedRelationships(uploadId, {
+        page: relationshipsPage,
+        limit: 20,
+      });
+      if (response.data) {
+        setRelationships(response.data.relationships || []);
+        setRelationshipsTotalPages(response.data.totalPages || 1);
+      }
+    } catch (error) {
+      console.error("Failed to load relationships:", error);
+    } finally {
+      setIsLoadingRelationships(false);
+    }
+  };
+
   const handleFileSelect = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const selectedFile = e.target.files?.[0];
       if (!selectedFile) return;
 
-      // Reset state
-      setParsedData([]);
-      setParseError(null);
-      setUploadResults([]);
+      setUploadError(null);
 
-      // Validate file type
       const validTypes = [
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/vnd.ms-excel",
@@ -80,324 +169,790 @@ export default function BulkUploadPage() {
         !selectedFile.name.endsWith(".xlsx") &&
         !selectedFile.name.endsWith(".xls")
       ) {
-        setParseError("Please upload an Excel file (.xlsx or .xls)");
+        setUploadError("Please upload an Excel file (.xlsx or .xls)");
         return;
       }
 
       setFile(selectedFile);
-      parseExcelFile(selectedFile);
     },
     []
   );
 
-  const parseExcelFile = async (file: File) => {
-    try {
-      const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: "array" });
-
-      // Get the first sheet (Devotionals)
-      const devotionalsSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const devotionalsData = XLSX.utils.sheet_to_json(devotionalsSheet);
-
-      // Get the second sheet (Quiz Questions) if it exists
-      const quizSheet = workbook.Sheets[workbook.SheetNames[1]];
-      const quizData = quizSheet
-        ? XLSX.utils.sheet_to_json<{
-            devotionalTitle: string;
-            question: string;
-            type: string;
-            option1: string;
-            option2: string;
-            option3: string;
-            option4: string;
-            correctAnswer: string;
-            points: number;
-          }>(quizSheet)
-        : [];
-
-      // Group quiz questions by devotional title
-      const quizMap = new Map<
-        string,
-        {
-          question: string;
-          type: "MULTIPLE_CHOICE" | "TRUE_FALSE" | "FILL_BLANK";
-          options: string[];
-          correctAnswer: string;
-          points: number;
-        }[]
-      >();
-
-      quizData.forEach((q: any) => {
-        const title = q.devotionalTitle?.toString().trim();
-        if (!title) return;
-
-        if (!quizMap.has(title)) {
-          quizMap.set(title, []);
-        }
-
-        // Map the type safely
-        let qType: "MULTIPLE_CHOICE" | "TRUE_FALSE" | "FILL_BLANK" =
-          "MULTIPLE_CHOICE";
-        if (q.type === "TRUE_FALSE") qType = "TRUE_FALSE";
-        if (q.type === "FILL_BLANK") qType = "FILL_BLANK";
-
-        quizMap.get(title)!.push({
-          question: q.question?.toString() || "",
-          type: qType,
-          options: [q.option1, q.option2, q.option3, q.option4]
-            .filter(Boolean)
-            .map(String),
-          correctAnswer: q.correctAnswer?.toString() || "",
-          points: Number(q.points) || 10,
-        });
-      });
-
-      // Parse devotionals
-      const parsed: ParsedDevotional[] = devotionalsData.map((row: any) => {
-        const title = row.title?.toString().trim() || "";
-        const reflectionQs: string[] = [];
-
-        // Parse reflection questions (columns like reflection1, reflection2, etc.)
-        for (let i = 1; i <= 5; i++) {
-          const q = row[`reflection${i}`] || row[`reflectionQuestion${i}`];
-          if (q) reflectionQs.push(q.toString().trim());
-        }
-
-        // Parse tags (comma-separated)
-        const tags = row.tags
-          ? row.tags
-              .toString()
-              .split(",")
-              .map((t: string) => t.trim())
-              .filter(Boolean)
-          : [];
-
-        return {
-          title,
-          subtitle: row.subtitle?.toString().trim() || undefined,
-          bibleReference: row.bibleReference?.toString().trim() || "",
-          verseText: row.verseText?.toString().trim() || "",
-          content: row.content?.toString().trim() || "",
-          prayerPrompt: row.prayerPrompt?.toString().trim() || undefined,
-          reflectionQuestions: reflectionQs,
-          audience: row.audience?.toString().toUpperCase() || "SPROUT_EXPLORER",
-          publishDate:
-            parseExcelDate(row.publishDate) ||
-            new Date().toISOString().split("T")[0],
-          tags,
-          isActive: row.isActive !== false && row.isActive !== "false",
-          quizTitle: quizMap.has(title) ? `${title} Quiz` : undefined,
-          quizQuestions: quizMap.get(title),
-        };
-      });
-
-      // Validate parsed data
-      const errors: string[] = [];
-      parsed.forEach((d, i) => {
-        if (!d.title) errors.push(`Row ${i + 2}: Missing title`);
-        if (!d.bibleReference)
-          errors.push(`Row ${i + 2}: Missing Bible reference`);
-        if (!d.verseText) errors.push(`Row ${i + 2}: Missing verse text`);
-        if (!d.content) errors.push(`Row ${i + 2}: Missing content`);
-      });
-
-      if (errors.length > 0) {
-        setParseError(
-          `Validation errors:\n${errors.slice(0, 10).join("\n")}${
-            errors.length > 10 ? `\n...and ${errors.length - 10} more` : ""
-          }`
-        );
-        return;
-      }
-
-      setParsedData(parsed);
-    } catch (error) {
-      console.error("Error parsing Excel file:", error);
-      setParseError(
-        "Failed to parse Excel file. Please check the file format."
-      );
-    }
-  };
-
-  const parseExcelDate = (value: any): string | null => {
-    if (!value) return null;
-
-    // If it's already a string date
-    if (typeof value === "string") {
-      const date = new Date(value);
-      if (!isNaN(date.getTime())) {
-        return date.toISOString().split("T")[0];
-      }
-      return value;
-    }
-
-    // If it's an Excel serial date number
-    if (typeof value === "number") {
-      const date = XLSX.SSF.parse_date_code(value);
-      return `${date.y}-${String(date.m).padStart(2, "0")}-${String(
-        date.d
-      ).padStart(2, "0")}`;
-    }
-
-    return null;
-  };
-
   const handleUpload = async () => {
-    if (parsedData.length === 0) return;
+    if (!file) return;
 
     setIsUploading(true);
-    setShowConfirmModal(false);
-    const results: UploadResult[] = [];
+    setUploadError(null);
 
-    for (const devotional of parsedData) {
-      try {
-        // Create devotional
-        const devResponse = await api.createDevotional({
-          title: devotional.title,
-          subtitle: devotional.subtitle,
-          bibleReference: devotional.bibleReference,
-          verseText: devotional.verseText,
-          content: devotional.content,
-          prayerPrompt: devotional.prayerPrompt,
-          reflectionQuestions: devotional.reflectionQuestions,
-          audience: devotional.audience as any,
-          publishDate: devotional.publishDate,
-          tags: devotional.tags,
-          isActive: devotional.isActive,
+    try {
+      const response = await api.uploadExcel(file);
+
+      if (response.data) {
+        setAlertModal({
+          isOpen: true,
+          title: "Upload Successful!",
+          message: `File "${file.name}" has been uploaded and parsed. ${response.data.summary.totalItems} items are ready for review.`,
+          variant: "success",
         });
 
-        const devotionalId = devResponse.data?.data?.id;
-        let quizId: string | undefined;
+        setFile(null);
+        await loadStagedUploads();
 
-        // Create quiz if questions exist
-        if (
-          devotional.quizQuestions &&
-          devotional.quizQuestions.length > 0 &&
-          devotionalId
-        ) {
-          try {
-            const quizResponse = await api.createQuiz({
-              title: devotional.quizTitle || `${devotional.title} Quiz`,
-              description: `Quiz for: ${devotional.title}`,
-              devotionalId: devotionalId,
-              audience: devotional.audience as any,
-              questions: devotional.quizQuestions,
-              passingScore: 70,
-              publishDate: devotional.publishDate,
-              isActive: devotional.isActive,
-            });
-            quizId = quizResponse.data?.quiz?.id;
-          } catch (quizError) {
-            console.error("Error creating quiz:", quizError);
+        // Auto-select the new upload
+        if (response.data.uploadId) {
+          const newUpload = await api.getStagedUpload(response.data.uploadId);
+          if (newUpload.data) {
+            setSelectedUpload(newUpload.data as unknown as StagedUpload);
           }
         }
-
-        results.push({
-          success: true,
-          devotionalId,
-          devotionalTitle: devotional.title,
-          quizId,
-        });
-      } catch (error: any) {
-        results.push({
-          success: false,
-          devotionalTitle: devotional.title,
-          error: error.message || "Failed to create",
-        });
       }
+    } catch (error: any) {
+      setUploadError(error.message || "Failed to upload file");
+    } finally {
+      setIsUploading(false);
     }
+  };
 
-    setUploadResults(results);
-    setIsUploading(false);
-    setShowResultsModal(true);
+  const handleApproveAll = async () => {
+    if (!selectedUpload) return;
 
-    const successCount = results.filter((r) => r.success).length;
-    const failCount = results.filter((r) => !r.success).length;
+    setIsApproving(true);
+    setShowConfirmApprove(false);
 
-    if (failCount === 0) {
+    try {
+      const response = await api.approveItems(selectedUpload._id, { mode: "bulk" });
+
+      if (response.data) {
+        setAlertModal({
+          isOpen: true,
+          title: "Approval Complete!",
+          message: `${response.data.approved} items approved, ${response.data.committed} committed to database.${
+            response.data.errors.length > 0
+              ? ` ${response.data.errors.length} errors occurred.`
+              : ""
+          }`,
+          variant: response.data.errors.length > 0 ? "error" : "success",
+        });
+
+        await loadStagedUploads();
+        const refreshed = await api.getStagedUpload(selectedUpload._id);
+        if (refreshed.data) {
+          setSelectedUpload(refreshed.data as unknown as StagedUpload);
+        }
+      }
+    } catch (error: any) {
       setAlertModal({
         isOpen: true,
-        title: "Upload Complete!",
-        message: `Successfully created ${successCount} devotionals with their quizzes.`,
+        title: "Approval Failed",
+        message: error.message || "Failed to approve items",
+        variant: "error",
+      });
+    } finally {
+      setIsApproving(false);
+    }
+  };
+
+  const handleRejectAll = async () => {
+    if (!selectedUpload) return;
+
+    setIsRejecting(true);
+    setShowConfirmReject(false);
+
+    try {
+      const response = await api.rejectItems(selectedUpload._id, { mode: "bulk" });
+
+      if (response.data) {
+        setAlertModal({
+          isOpen: true,
+          title: "Rejection Complete",
+          message: `${response.data.rejected} items rejected.`,
+          variant: "success",
+        });
+
+        await loadStagedUploads();
+        const refreshed = await api.getStagedUpload(selectedUpload._id);
+        if (refreshed.data) {
+          setSelectedUpload(refreshed.data as unknown as StagedUpload);
+        }
+      }
+    } catch (error: any) {
+      setAlertModal({
+        isOpen: true,
+        title: "Rejection Failed",
+        message: error.message || "Failed to reject items",
+        variant: "error",
+      });
+    } finally {
+      setIsRejecting(false);
+    }
+  };
+
+  const handleDeleteUpload = async () => {
+    if (!selectedUpload) return;
+
+    setShowConfirmDelete(false);
+
+    try {
+      await api.deleteStagedUpload(selectedUpload._id);
+
+      setAlertModal({
+        isOpen: true,
+        title: "Deleted",
+        message: "Staged upload has been deleted.",
         variant: "success",
       });
-    } else {
+
+      setSelectedUpload(null);
+      await loadStagedUploads();
+    } catch (error: any) {
       setAlertModal({
         isOpen: true,
-        title: "Upload Completed with Errors",
-        message: `Created ${successCount} devotionals. Failed: ${failCount}`,
+        title: "Delete Failed",
+        message: error.message || "Failed to delete upload",
+        variant: "error",
+      });
+    }
+  };
+
+  const handleItemStatusChange = async (
+    sheet: SheetName,
+    rowIndex: number,
+    status: "approved" | "rejected"
+  ) => {
+    if (!selectedUpload) return;
+
+    try {
+      await api.updateStagedItemStatus(selectedUpload._id, {
+        sheet,
+        rowIndex,
+        status,
+      });
+
+      // Refresh data
+      await loadSheetData(selectedUpload._id, sheet);
+      const refreshed = await api.getStagedUpload(selectedUpload._id);
+      if (refreshed.data) {
+        setSelectedUpload(refreshed.data as unknown as StagedUpload);
+      }
+    } catch (error: any) {
+      setAlertModal({
+        isOpen: true,
+        title: "Update Failed",
+        message: error.message || "Failed to update item status",
         variant: "error",
       });
     }
   };
 
   const downloadTemplate = () => {
-    // Create template workbook
     const wb = XLSX.utils.book_new();
 
-    // Devotionals sheet
-    const devotionalsTemplate = [
+    // Memory Verses template
+    const mvTemplate = [
       {
-        title: "The Good Shepherd",
-        subtitle: "Jesus cares for His sheep",
-        bibleReference: "John 10:11-14",
-        verseText:
-          "I am the good shepherd. The good shepherd lays down his life for the sheep.",
-        content:
-          "Jesus told a story about a shepherd who loves his sheep very much. The shepherd knows each sheep by name and protects them from danger. Jesus said He is like that shepherd - He knows us and loves us!",
-        prayerPrompt:
-          "Thank Jesus for being your Good Shepherd who loves and protects you.",
-        reflection1: "How does Jesus show He cares for you?",
-        reflection2:
-          "What does it mean to follow Jesus like sheep follow a shepherd?",
-        audience: "SPROUT_EXPLORER",
-        publishDate: "2026-01-15",
-        tags: "Jesus, Love, Protection",
-        isActive: true,
+        DayID: "20260118",
+        Date: "2026-01-18",
+        BibleReading: "Matthew 1:1-25",
+        "Verse Text_5_8": "For God so loved the world...",
+        "Verse Text_9_12": "For God so loved the world that he gave...",
+        Reference: "John 3:16",
       },
     ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mvTemplate), "MemoryVerses");
 
-    const devotionalsWs = XLSX.utils.json_to_sheet(devotionalsTemplate);
-    XLSX.utils.book_append_sheet(wb, devotionalsWs, "Devotionals");
+    // Key Lessons template
+    const klTemplate = [
+      {
+        DayID: "20260118",
+        Date: "2026-01-18",
+        BibleReading: "Matthew 1:1-25",
+        "Lesson1_5_8": "God keeps His promises",
+        "Lesson2_5_8": "Jesus is God's Son",
+        "Lesson3_5_8": "God has a plan for everyone",
+        "Lesson1_9_12": "God fulfills prophecy",
+        "Lesson2_9_12": "Jesus came to save us",
+        "Lesson3_9_12": "Trust in God's timing",
+      },
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(klTemplate), "KeyLessons");
 
-    // Quiz Questions sheet
+    // Quiz template
     const quizTemplate = [
       {
-        devotionalTitle: "The Good Shepherd",
-        question: "Who is the Good Shepherd?",
-        type: "MULTIPLE_CHOICE",
-        option1: "David",
-        option2: "Moses",
-        option3: "Jesus",
-        option4: "Abraham",
-        correctAnswer: "Jesus",
-        points: 10,
+        DayID: "20260118",
+        Date: "2026-01-18",
+        BibleReading: "Matthew 1:1-25",
+        Q1: "Who was Jesus' earthly father?",
+        Q1A: "Joseph",
+        Q1B: "David",
+        Q1C: "Abraham",
+        Q1D: "Moses",
+        Q1Answer: "A",
+        Q2: "What does Emmanuel mean?",
+        Q2A: "King of Kings",
+        Q2B: "God with us",
+        Q2C: "Prince of Peace",
+        Q2D: "Savior",
+        Q2Answer: "B",
+      },
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(quizTemplate), "Q_5_8");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(quizTemplate), "Q_9_12");
+
+    // Devotional template
+    const devTemplate = [
+      {
+        DayID: "20260118",
+        Date: "2026-01-18",
+        Title: "God's Promise Fulfilled",
+        BibleReading: "Matthew 1:1-25",
+        "Body/Story": "Long ago, God made a promise to send a Savior...",
+        FaithSpeaks: "I believe God keeps His promises.",
+        WordChallenge: "Share one promise of God with a friend.",
+      },
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(devTemplate), "Children Devotional");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(devTemplate), "Adult Devotional");
+
+    XLSX.writeFile(wb, "planted_bulk_upload_template.xlsx");
+  };
+
+  const toggleDayExpanded = (dayId: string) => {
+    const newExpanded = new Set(expandedDays);
+    if (newExpanded.has(dayId)) {
+      newExpanded.delete(dayId);
+    } else {
+      newExpanded.add(dayId);
+    }
+    setExpandedDays(newExpanded);
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "pending":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400">
+            <Clock className="w-3 h-3" /> Pending
+          </span>
+        );
+      case "approved":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+            <CheckCircle className="w-3 h-3" /> Approved
+          </span>
+        );
+      case "rejected":
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+            <XCircle className="w-3 h-3" /> Rejected
+          </span>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const renderUploadsList = () => (
+    <div className="card">
+      <div className="p-4 border-b border-gray-200 dark:border-dark-border">
+        <h3 className="font-semibold text-gray-900 dark:text-white">Staged Uploads</h3>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Click an upload to review and approve items
+        </p>
+      </div>
+
+      {isLoadingUploads ? (
+        <div className="p-8 text-center">
+          <Loader2 className="w-8 h-8 text-primary-500 animate-spin mx-auto" />
+        </div>
+      ) : stagedUploads.length === 0 ? (
+        <div className="p-8 text-center text-gray-500 dark:text-gray-400">
+          No staged uploads. Upload an Excel file to get started.
+        </div>
+      ) : (
+        <div className="divide-y divide-gray-200 dark:divide-dark-border max-h-96 overflow-y-auto">
+          {stagedUploads.map((upload) => (
+            <button
+              key={upload._id}
+              onClick={() => {
+                setSelectedUpload(upload);
+                setActiveTab("memoryVerses");
+                setSheetPage(1);
+              }}
+              className={`w-full p-4 text-left hover:bg-gray-50 dark:hover:bg-dark-hover transition-colors ${
+                selectedUpload?._id === upload._id
+                  ? "bg-primary-50 dark:bg-primary-900/20"
+                  : ""
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <FileSpreadsheet className="w-8 h-8 text-green-600 flex-shrink-0" />
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white truncate max-w-xs">
+                      {upload.fileName}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {new Date(upload.uploadedAt).toLocaleDateString()} •{" "}
+                      {upload.summary.totalItems} items
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span
+                    className={`text-xs font-medium px-2 py-1 rounded-full ${
+                      upload.status === "FULLY_APPROVED"
+                        ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                        : upload.status === "PARTIALLY_APPROVED"
+                        ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                        : upload.status === "REJECTED"
+                        ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                        : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                    }`}
+                  >
+                    {upload.status.replace("_", " ")}
+                  </span>
+                </div>
+              </div>
+              <div className="mt-2 grid grid-cols-4 gap-2 text-xs">
+                <div className="text-center">
+                  <span className="text-yellow-600 dark:text-yellow-400 font-medium">
+                    {upload.summary.pendingApproval}
+                  </span>
+                  <span className="text-gray-500 dark:text-gray-400"> pending</span>
+                </div>
+                <div className="text-center">
+                  <span className="text-green-600 dark:text-green-400 font-medium">
+                    {upload.summary.approved}
+                  </span>
+                  <span className="text-gray-500 dark:text-gray-400"> approved</span>
+                </div>
+                <div className="text-center">
+                  <span className="text-red-600 dark:text-red-400 font-medium">
+                    {upload.summary.rejected}
+                  </span>
+                  <span className="text-gray-500 dark:text-gray-400"> rejected</span>
+                </div>
+                <div className="text-center">
+                  <span className="text-gray-600 dark:text-gray-300 font-medium">
+                    {upload.summary.totalItems}
+                  </span>
+                  <span className="text-gray-500 dark:text-gray-400"> total</span>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderSheetTabs = () => {
+    if (!selectedUpload) return null;
+
+    const tabs: Array<{ key: SheetName | "relationships"; label: string; count: number }> = [
+      {
+        key: "memoryVerses",
+        label: "Memory Verses",
+        count: selectedUpload.sheets.memoryVerses.totalItems,
       },
       {
-        devotionalTitle: "The Good Shepherd",
-        question: "The shepherd knows each sheep by name.",
-        type: "TRUE_FALSE",
-        option1: "True",
-        option2: "False",
-        option3: "",
-        option4: "",
-        correctAnswer: "True",
-        points: 10,
+        key: "keyLessons",
+        label: "Key Lessons",
+        count: selectedUpload.sheets.keyLessons.totalItems,
+      },
+      {
+        key: "quizzes_5_8",
+        label: "Quizzes (5-8)",
+        count: selectedUpload.sheets.quizzes_5_8.totalItems,
+      },
+      {
+        key: "quizzes_9_12",
+        label: "Quizzes (9-12)",
+        count: selectedUpload.sheets.quizzes_9_12.totalItems,
+      },
+      {
+        key: "childrenDevotionals",
+        label: "Kids Devotionals",
+        count: selectedUpload.sheets.childrenDevotionals.totalItems,
+      },
+      {
+        key: "adultDevotionals",
+        label: "Adult Devotionals",
+        count: selectedUpload.sheets.adultDevotionals.totalItems,
+      },
+      {
+        key: "relationships",
+        label: "Day Links",
+        count: selectedUpload.relationships?.length || 0,
       },
     ];
 
-    const quizWs = XLSX.utils.json_to_sheet(quizTemplate);
-    XLSX.utils.book_append_sheet(wb, quizWs, "Quiz Questions");
-
-    // Download
-    XLSX.writeFile(wb, "devotionals_quizzes_template.xlsx");
+    return (
+      <div className="flex gap-1 overflow-x-auto pb-2">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => {
+              setActiveTab(tab.key);
+              setSheetPage(1);
+              setRelationshipsPage(1);
+            }}
+            className={`px-3 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${
+              activeTab === tab.key
+                ? "bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400"
+                : "text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-dark-hover"
+            }`}
+          >
+            {tab.label}
+            {tab.count > 0 && (
+              <span className="ml-1.5 px-1.5 py-0.5 text-xs rounded-full bg-gray-200 dark:bg-dark-border">
+                {tab.count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+    );
   };
 
-  const clearFile = () => {
-    setFile(null);
-    setParsedData([]);
-    setParseError(null);
-    setUploadResults([]);
+  const renderSheetContent = () => {
+    if (!selectedUpload) return null;
+
+    if (activeTab === "relationships") {
+      return renderRelationships();
+    }
+
+    if (isLoadingSheet) {
+      return (
+        <div className="p-8 text-center">
+          <Loader2 className="w-8 h-8 text-primary-500 animate-spin mx-auto" />
+        </div>
+      );
+    }
+
+    if (sheetItems.length === 0) {
+      return (
+        <div className="p-8 text-center text-gray-500 dark:text-gray-400">
+          No items in this sheet.
+        </div>
+      );
+    }
+
+    // Get column headers from first item's data
+    const firstItem = sheetItems[0];
+    const columns = firstItem ? Object.keys(firstItem.data) : [];
+
+    return (
+      <div className="overflow-x-auto">
+        <table className="table text-sm">
+          <thead className="sticky top-0 bg-gray-50 dark:bg-dark-card z-10">
+            <tr>
+              <th className="w-12">#</th>
+              <th className="w-24">Status</th>
+              <th className="w-24">Day ID</th>
+              {columns.slice(0, 5).map((col) => (
+                <th key={col} className="max-w-xs">
+                  {col}
+                </th>
+              ))}
+              <th className="w-32">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sheetItems.map((item) => (
+              <tr key={item.index} className="hover:bg-gray-50 dark:hover:bg-dark-hover">
+                <td className="text-gray-500">{item.index + 1}</td>
+                <td>{getStatusBadge(item.status)}</td>
+                <td className="font-mono text-xs">{item.dayId}</td>
+                {columns.slice(0, 5).map((col) => (
+                  <td key={col} className="max-w-xs truncate">
+                    {String(item.data[col] || "—")}
+                  </td>
+                ))}
+                <td>
+                  <div className="flex items-center gap-1">
+                    {item.status === "pending" && (
+                      <>
+                        <button
+                          onClick={() =>
+                            handleItemStatusChange(activeTab as SheetName, item.index, "approved")
+                          }
+                          className="p-1 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded"
+                          title="Approve"
+                        >
+                          <Check className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() =>
+                            handleItemStatusChange(activeTab as SheetName, item.index, "rejected")
+                          }
+                          className="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                          title="Reject"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {/* Pagination */}
+        {sheetTotalPages > 1 && (
+          <div className="flex items-center justify-between p-4 border-t border-gray-200 dark:border-dark-border">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Page {sheetPage} of {sheetTotalPages}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={sheetPage === 1}
+                onClick={() => setSheetPage((p) => p - 1)}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={sheetPage === sheetTotalPages}
+                onClick={() => setSheetPage((p) => p + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderRelationships = () => {
+    if (isLoadingRelationships) {
+      return (
+        <div className="p-8 text-center">
+          <Loader2 className="w-8 h-8 text-primary-500 animate-spin mx-auto" />
+        </div>
+      );
+    }
+
+    if (relationships.length === 0) {
+      return (
+        <div className="p-8 text-center text-gray-500 dark:text-gray-400">
+          No day relationships found.
+        </div>
+      );
+    }
+
+    return (
+      <div className="divide-y divide-gray-200 dark:divide-dark-border">
+        {relationships.map((rel) => (
+          <div key={rel.dayId} className="p-4">
+            <button
+              onClick={() => toggleDayExpanded(rel.dayId)}
+              className="w-full flex items-center justify-between text-left"
+            >
+              <div className="flex items-center gap-3">
+                {expandedDays.has(rel.dayId) ? (
+                  <ChevronDown className="w-5 h-5 text-gray-400" />
+                ) : (
+                  <ChevronRight className="w-5 h-5 text-gray-400" />
+                )}
+                <div>
+                  <p className="font-medium text-gray-900 dark:text-white">
+                    Day {rel.dayId} • {new Date(rel.publishDate).toLocaleDateString()}
+                  </p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{rel.bibleReading}</p>
+                </div>
+              </div>
+              <Link2 className="w-5 h-5 text-gray-400" />
+            </button>
+
+            {expandedDays.has(rel.dayId) && (
+              <div className="mt-4 ml-8 grid grid-cols-2 md:grid-cols-4 gap-4">
+                {Object.entries(rel.items).map(([key, value]) => {
+                  if (!value) return null;
+                  return (
+                    <div
+                      key={key}
+                      className="p-3 bg-gray-50 dark:bg-dark-hover rounded-lg"
+                    >
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                        {key.replace(/_/g, " ")}
+                      </p>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-900 dark:text-white">
+                          Row {value.rowIndex + 1}
+                        </span>
+                        {getStatusBadge(value.status)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* Pagination */}
+        {relationshipsTotalPages > 1 && (
+          <div className="flex items-center justify-between p-4">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Page {relationshipsPage} of {relationshipsTotalPages}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={relationshipsPage === 1}
+                onClick={() => setRelationshipsPage((p) => p - 1)}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={relationshipsPage === relationshipsTotalPages}
+                onClick={() => setRelationshipsPage((p) => p + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderReviewPanel = () => {
+    if (!selectedUpload) {
+      return (
+        <div className="card p-8 text-center">
+          <Eye className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+          <p className="text-gray-500 dark:text-gray-400">
+            Select a staged upload from the list to review
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="card">
+        {/* Header */}
+        <div className="p-4 border-b border-gray-200 dark:border-dark-border">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="font-semibold text-gray-900 dark:text-white">
+                {selectedUpload.fileName}
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Uploaded {new Date(selectedUpload.uploadedAt).toLocaleString()}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => loadStagedUploads()}
+                leftIcon={<RefreshCw className="w-4 h-4" />}
+              >
+                Refresh
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowConfirmDelete(true)}
+                className="text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+
+          {/* Summary stats */}
+          <div className="mt-4 grid grid-cols-4 gap-4">
+            <div className="text-center p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+              <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                {selectedUpload.summary.pendingApproval}
+              </p>
+              <p className="text-xs text-yellow-700 dark:text-yellow-300">Pending</p>
+            </div>
+            <div className="text-center p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+              <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                {selectedUpload.summary.approved}
+              </p>
+              <p className="text-xs text-green-700 dark:text-green-300">Approved</p>
+            </div>
+            <div className="text-center p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+              <p className="text-2xl font-bold text-red-600 dark:text-red-400">
+                {selectedUpload.summary.rejected}
+              </p>
+              <p className="text-xs text-red-700 dark:text-red-300">Rejected</p>
+            </div>
+            <div className="text-center p-3 bg-gray-50 dark:bg-dark-hover rounded-lg">
+              <p className="text-2xl font-bold text-gray-600 dark:text-gray-300">
+                {selectedUpload.summary.totalItems}
+              </p>
+              <p className="text-xs text-gray-700 dark:text-gray-400">Total</p>
+            </div>
+          </div>
+
+          {/* Parse errors */}
+          {selectedUpload.parseErrors && selectedUpload.parseErrors.length > 0 && (
+            <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
+                <div>
+                  <p className="font-medium text-red-700 dark:text-red-400">Parse Errors</p>
+                  <ul className="mt-1 text-sm text-red-600 dark:text-red-300 list-disc list-inside">
+                    {selectedUpload.parseErrors.slice(0, 5).map((err, i) => (
+                      <li key={i}>{err}</li>
+                    ))}
+                    {selectedUpload.parseErrors.length > 5 && (
+                      <li>...and {selectedUpload.parseErrors.length - 5} more</li>
+                    )}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Bulk actions */}
+          {selectedUpload.summary.pendingApproval > 0 && (
+            <div className="mt-4 flex gap-2">
+              <Button
+                onClick={() => setShowConfirmApprove(true)}
+                leftIcon={<CheckCircle className="w-4 h-4" />}
+                isLoading={isApproving}
+              >
+                Approve All Pending ({selectedUpload.summary.pendingApproval})
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setShowConfirmReject(true)}
+                leftIcon={<XCircle className="w-4 h-4" />}
+                isLoading={isRejecting}
+                className="text-red-600"
+              >
+                Reject All Pending
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* Tabs */}
+        <div className="p-4 border-b border-gray-200 dark:border-dark-border">
+          {renderSheetTabs()}
+        </div>
+
+        {/* Content */}
+        <div className="max-h-[500px] overflow-y-auto">{renderSheetContent()}</div>
+      </div>
+    );
   };
 
   return (
@@ -405,11 +960,9 @@ export default function BulkUploadPage() {
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            Bulk Upload
-          </h1>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Bulk Upload</h1>
           <p className="text-gray-500 dark:text-gray-400 mt-1">
-            Upload devotionals and quizzes from an Excel file
+            Upload Excel files with content to review and approve before publishing
           </p>
         </div>
         <Button
@@ -421,63 +974,19 @@ export default function BulkUploadPage() {
         </Button>
       </div>
 
-      {/* Instructions Card */}
+      {/* Upload Area */}
       <div className="card p-6">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-          📋 How it works
+          Upload New File
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="flex items-start gap-3">
-            <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center text-primary-600 dark:text-primary-400 font-bold text-sm">
-              1
-            </div>
-            <div>
-              <p className="font-medium text-gray-900 dark:text-white">
-                Download Template
-              </p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Get the Excel template with the correct column structure
-              </p>
-            </div>
-          </div>
-          <div className="flex items-start gap-3">
-            <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center text-primary-600 dark:text-primary-400 font-bold text-sm">
-              2
-            </div>
-            <div>
-              <p className="font-medium text-gray-900 dark:text-white">
-                Fill in Your Data
-              </p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Add devotionals in Sheet 1, quiz questions in Sheet 2
-              </p>
-            </div>
-          </div>
-          <div className="flex items-start gap-3">
-            <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center text-primary-600 dark:text-primary-400 font-bold text-sm">
-              3
-            </div>
-            <div>
-              <p className="font-medium text-gray-900 dark:text-white">
-                Upload & Create
-              </p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Upload the file and all content will be created automatically
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      {/* Upload Area */}
-      <div className="card p-8">
         {!file ? (
-          <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 dark:border-dark-border rounded-2xl p-12 cursor-pointer hover:border-primary-500 hover:bg-primary-50/50 dark:hover:bg-primary-900/10 transition-all duration-200">
-            <FileSpreadsheet className="w-16 h-16 text-gray-400 mb-4" />
-            <p className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+          <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 dark:border-dark-border rounded-xl p-8 cursor-pointer hover:border-primary-500 hover:bg-primary-50/50 dark:hover:bg-primary-900/10 transition-all duration-200">
+            <FileSpreadsheet className="w-12 h-12 text-gray-400 mb-3" />
+            <p className="text-base font-medium text-gray-900 dark:text-white mb-1">
               Drop your Excel file here
             </p>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
               or click to browse (.xlsx, .xls)
             </p>
             <input
@@ -486,249 +995,99 @@ export default function BulkUploadPage() {
               onChange={handleFileSelect}
               className="hidden"
             />
-            <Button
-              variant="secondary"
-              leftIcon={<Upload className="w-4 h-4" />}
-            >
+            <Button variant="secondary" leftIcon={<Upload className="w-4 h-4" />}>
               Select File
             </Button>
           </label>
         ) : (
-          <div>
-            {/* File Info */}
-            <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-hover rounded-xl mb-6">
-              <div className="flex items-center gap-3">
-                <FileSpreadsheet className="w-10 h-10 text-green-600" />
-                <div>
-                  <p className="font-medium text-gray-900 dark:text-white">
-                    {file.name}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    {(file.size / 1024).toFixed(1)} KB
-                  </p>
-                </div>
+          <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-hover rounded-xl">
+            <div className="flex items-center gap-3">
+              <FileSpreadsheet className="w-10 h-10 text-green-600" />
+              <div>
+                <p className="font-medium text-gray-900 dark:text-white">{file.name}</p>
+                <p className="text-sm text-gray-500">{(file.size / 1024).toFixed(1)} KB</p>
               </div>
-              <button
-                onClick={clearFile}
-                className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-dark-card transition-colors"
-              >
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
             </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setFile(null);
+                  setUploadError(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleUpload}
+                leftIcon={<Upload className="w-4 h-4" />}
+                isLoading={isUploading}
+              >
+                Upload & Parse
+              </Button>
+            </div>
+          </div>
+        )}
 
-            {/* Parse Error */}
-            {parseError && (
-              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 mb-6">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-medium text-red-700 dark:text-red-400">
-                      Error Parsing File
-                    </p>
-                    <pre className="text-sm text-red-600 dark:text-red-300 whitespace-pre-wrap mt-1">
-                      {parseError}
-                    </pre>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Parsed Data Preview */}
-            {parsedData.length > 0 && (
-              <>
-                <div className="flex items-center justify-between mb-4">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Found{" "}
-                    <strong className="text-primary-600">
-                      {parsedData.length}
-                    </strong>{" "}
-                    devotionals
-                    {parsedData.filter((d) => d.quizQuestions).length > 0 && (
-                      <>
-                        {" "}
-                        with{" "}
-                        <strong className="text-primary-600">
-                          {parsedData.filter((d) => d.quizQuestions).length}
-                        </strong>{" "}
-                        quizzes
-                      </>
-                    )}
-                  </p>
-                </div>
-
-                <div className="overflow-x-auto max-h-80 overflow-y-auto border border-gray-200 dark:border-dark-border rounded-xl">
-                  <table className="table text-sm">
-                    <thead className="sticky top-0 bg-gray-50 dark:bg-dark-card">
-                      <tr>
-                        <th>#</th>
-                        <th>Title</th>
-                        <th>Bible Reference</th>
-                        <th>Audience</th>
-                        <th>Publish Date</th>
-                        <th>Quiz</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {parsedData.map((d, i) => (
-                        <tr key={i}>
-                          <td className="text-gray-500">{i + 1}</td>
-                          <td className="font-medium text-gray-900 dark:text-white max-w-xs truncate">
-                            {d.title}
-                          </td>
-                          <td className="text-gray-600 dark:text-gray-400">
-                            {d.bibleReference}
-                          </td>
-                          <td>
-                            <span
-                              className={`badge ${
-                                d.audience === "SPROUT_EXPLORER"
-                                  ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                                  : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-                              }`}
-                            >
-                              {d.audience === "SPROUT_EXPLORER"
-                                ? "Kids"
-                                : "Teens"}
-                            </span>
-                          </td>
-                          <td className="text-gray-600 dark:text-gray-400">
-                            {d.publishDate}
-                          </td>
-                          <td>
-                            {d.quizQuestions ? (
-                              <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
-                                <CheckCircle className="w-4 h-4" />
-                                {d.quizQuestions.length} Qs
-                              </span>
-                            ) : (
-                              <span className="text-gray-400">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Upload Button */}
-                <div className="flex justify-end gap-3 mt-6">
-                  <Button variant="secondary" onClick={clearFile}>
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={() => setShowConfirmModal(true)}
-                    leftIcon={<Upload className="w-5 h-5" />}
-                    isLoading={isUploading}
-                  >
-                    Upload {parsedData.length} Devotionals
-                  </Button>
-                </div>
-              </>
-            )}
+        {uploadError && (
+          <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2">
+            <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
+            <p className="text-sm text-red-600 dark:text-red-400">{uploadError}</p>
           </div>
         )}
       </div>
 
-      {/* Uploading Progress */}
-      {isUploading && (
-        <div className="card p-8 text-center">
-          <Loader2 className="w-12 h-12 text-primary-500 animate-spin mx-auto mb-4" />
-          <p className="text-lg font-medium text-gray-900 dark:text-white">
-            Uploading content...
-          </p>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-            Please wait while we create your devotionals and quizzes
-          </p>
-        </div>
-      )}
+      {/* Main Content */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Staged Uploads List */}
+        <div className="lg:col-span-1">{renderUploadsList()}</div>
 
-      {/* Confirm Upload Modal */}
+        {/* Review Panel */}
+        <div className="lg:col-span-2">{renderReviewPanel()}</div>
+      </div>
+
+      {/* Confirm Approve Modal */}
       <ConfirmModal
-        isOpen={showConfirmModal}
-        onClose={() => setShowConfirmModal(false)}
-        onConfirm={handleUpload}
-        title="Confirm Upload"
+        isOpen={showConfirmApprove}
+        onClose={() => setShowConfirmApprove(false)}
+        onConfirm={handleApproveAll}
+        title="Approve All Pending Items"
         message={
           <>
-            You are about to create <strong>{parsedData.length}</strong>{" "}
-            devotionals
-            {parsedData.filter((d) => d.quizQuestions).length > 0 && (
-              <>
-                {" "}
-                and{" "}
-                <strong>
-                  {parsedData.filter((d) => d.quizQuestions).length}
-                </strong>{" "}
-                linked quizzes
-              </>
-            )}
-            . This action cannot be easily undone.
+            This will approve all <strong>{selectedUpload?.summary.pendingApproval}</strong> pending
+            items and commit them to the database. This action cannot be undone.
           </>
         }
-        confirmText="Upload All"
+        confirmText="Approve All"
         variant="success"
       />
 
-      {/* Results Modal */}
-      <Modal
-        isOpen={showResultsModal}
-        onClose={() => setShowResultsModal(false)}
-        title="Upload Results"
-        size="lg"
-      >
-        <div className="max-h-96 overflow-y-auto">
-          <table className="table text-sm">
-            <thead className="sticky top-0 bg-white dark:bg-dark-bg">
-              <tr>
-                <th>Status</th>
-                <th>Devotional</th>
-                <th>Quiz</th>
-              </tr>
-            </thead>
-            <tbody>
-              {uploadResults.map((result, i) => (
-                <tr key={i}>
-                  <td>
-                    {result.success ? (
-                      <span className="inline-flex items-center gap-1 text-green-600">
-                        <CheckCircle className="w-4 h-4" /> Success
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-red-600">
-                        <AlertTriangle className="w-4 h-4" /> Failed
-                      </span>
-                    )}
-                  </td>
-                  <td className="max-w-xs truncate">
-                    {result.devotionalTitle}
-                  </td>
-                  <td>
-                    {result.quizId ? (
-                      <span className="text-green-600">Created</span>
-                    ) : result.success ? (
-                      <span className="text-gray-400">No quiz</span>
-                    ) : (
-                      <span className="text-red-600 text-sm">
-                        {result.error}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="flex justify-end mt-4 pt-4 border-t border-gray-100 dark:border-dark-border">
-          <Button
-            onClick={() => {
-              setShowResultsModal(false);
-              clearFile();
-            }}
-          >
-            Done
-          </Button>
-        </div>
-      </Modal>
+      {/* Confirm Reject Modal */}
+      <ConfirmModal
+        isOpen={showConfirmReject}
+        onClose={() => setShowConfirmReject(false)}
+        onConfirm={handleRejectAll}
+        title="Reject All Pending Items"
+        message={
+          <>
+            This will reject all <strong>{selectedUpload?.summary.pendingApproval}</strong> pending
+            items. They will not be committed to the database.
+          </>
+        }
+        confirmText="Reject All"
+        variant="danger"
+      />
+
+      {/* Confirm Delete Modal */}
+      <ConfirmModal
+        isOpen={showConfirmDelete}
+        onClose={() => setShowConfirmDelete(false)}
+        onConfirm={handleDeleteUpload}
+        title="Delete Staged Upload"
+        message="This will permanently delete this staged upload and all its data. This action cannot be undone."
+        confirmText="Delete"
+        variant="danger"
+      />
 
       {/* Alert Modal */}
       <AlertModal

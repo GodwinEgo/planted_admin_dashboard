@@ -376,6 +376,194 @@ class ApiClient {
       `/progress?${query.toString()}`
     );
   }
+
+  // ============================================================================
+  // Admin endpoints - Key Lessons
+  // ============================================================================
+
+  async getKeyLessons(params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    audience?: string;
+  }) {
+    const query = new URLSearchParams();
+    if (params?.page) query.set("page", params.page.toString());
+    if (params?.limit) query.set("limit", params.limit.toString());
+    if (params?.search) query.set("search", params.search);
+    if (params?.audience) query.set("audience", params.audience);
+    return this.request<PaginatedResponse<KeyLesson>>(
+      `/admin/key-lessons?${query.toString()}`
+    );
+  }
+
+  async createKeyLesson(data: Partial<KeyLesson>) {
+    return this.request<{ data: KeyLesson }>("/admin/key-lessons", {
+      method: "POST",
+      body: data,
+    });
+  }
+
+  async updateKeyLesson(keyLessonId: string, data: Partial<KeyLesson>) {
+    return this.request<{ data: KeyLesson }>(
+      `/admin/key-lessons/${keyLessonId}`,
+      {
+        method: "PATCH",
+        body: data,
+      }
+    );
+  }
+
+  async deleteKeyLesson(keyLessonId: string) {
+    return this.request(`/admin/key-lessons/${keyLessonId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // ============================================================================
+  // Admin endpoints - Bulk Upload
+  // ============================================================================
+
+  async uploadExcel(file: File) {
+    const token = this.getToken();
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch(`${this.baseUrl}/admin/bulk-upload/upload`, {
+      method: "POST",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: formData,
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || "Failed to upload file");
+    }
+
+    return data as ApiResponse<StagedUploadResponse>;
+  }
+
+  async getStagedUploads(params?: {
+    page?: number;
+    limit?: number;
+    status?: string;
+  }) {
+    const query = new URLSearchParams();
+    if (params?.page) query.set("page", params.page.toString());
+    if (params?.limit) query.set("limit", params.limit.toString());
+    if (params?.status) query.set("status", params.status);
+    return this.request<PaginatedResponse<StagedUpload>>(
+      `/admin/bulk-upload/staged?${query.toString()}`
+    );
+  }
+
+  async getStagedUpload(uploadId: string) {
+    return this.request<StagedUpload>(
+      `/admin/bulk-upload/staged/${uploadId}`
+    );
+  }
+
+  async getStagedUploadSummary(uploadId: string) {
+    return this.request<StagedUploadSummary>(
+      `/admin/bulk-upload/staged/${uploadId}/summary`
+    );
+  }
+
+  async getStagedSheet(
+    uploadId: string,
+    sheetName: string,
+    params?: { page?: number; limit?: number }
+  ) {
+    const query = new URLSearchParams();
+    if (params?.page) query.set("page", params.page.toString());
+    if (params?.limit) query.set("limit", params.limit.toString());
+    return this.request<StagedSheetResponse>(
+      `/admin/bulk-upload/staged/${uploadId}/sheet/${sheetName}?${query.toString()}`
+    );
+  }
+
+  async getStagedRelationships(
+    uploadId: string,
+    params?: { page?: number; limit?: number }
+  ) {
+    const query = new URLSearchParams();
+    if (params?.page) query.set("page", params.page.toString());
+    if (params?.limit) query.set("limit", params.limit.toString());
+    return this.request<{
+      relationships: DayRelationship[];
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+    }>(`/admin/bulk-upload/staged/${uploadId}/relationships?${query.toString()}`);
+  }
+
+  async editStagedItem(
+    uploadId: string,
+    data: { sheet: string; rowIndex: number; field: string; value: unknown }
+  ) {
+    return this.request<{ data: StagedItem }>(
+      `/admin/bulk-upload/staged/${uploadId}/item`,
+      {
+        method: "PATCH",
+        body: data,
+      }
+    );
+  }
+
+  async updateStagedItemStatus(
+    uploadId: string,
+    data: { sheet: string; rowIndex: number; status: StagedItemStatus }
+  ) {
+    return this.request<{ data: StagedItem }>(
+      `/admin/bulk-upload/staged/${uploadId}/status`,
+      {
+        method: "PATCH",
+        body: data,
+      }
+    );
+  }
+
+  async approveItems(
+    uploadId: string,
+    data: {
+      mode: "bulk" | "selective";
+      items?: Array<{ sheet: string; rowIndex: number }>;
+    }
+  ) {
+    return this.request<{ approved: number; committed: number; errors: string[] }>(
+      `/admin/bulk-upload/staged/${uploadId}/approve`,
+      {
+        method: "POST",
+        body: data,
+      }
+    );
+  }
+
+  async rejectItems(
+    uploadId: string,
+    data: {
+      mode: "bulk" | "selective";
+      items?: Array<{ sheet: string; rowIndex: number }>;
+    }
+  ) {
+    return this.request<{ rejected: number }>(
+      `/admin/bulk-upload/staged/${uploadId}/reject`,
+      {
+        method: "POST",
+        body: data,
+      }
+    );
+  }
+
+  async deleteStagedUpload(uploadId: string) {
+    return this.request(`/admin/bulk-upload/staged/${uploadId}`, {
+      method: "DELETE",
+    });
+  }
 }
 
 // ============================================================================
@@ -558,8 +746,129 @@ export interface DashboardStats {
   totalStories: number;
   totalChallenges: number;
   totalMemoryVerses: number;
+  totalKeyLessons?: number;
   usersByType: { type: string; count: number }[];
   recentSignups: User[];
+}
+
+// ============================================================================
+// Key Lesson Types
+// ============================================================================
+
+export interface KeyLesson {
+  id: string;
+  dayId: string;
+  publishDate: string;
+  audience: "SPROUT_EXPLORER" | "TRAILBLAZER_TEEN";
+  bibleReading: string;
+  lessons: { order: number; text: string }[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ============================================================================
+// Bulk Upload Types
+// ============================================================================
+
+export type StagedUploadStatus =
+  | "PENDING"
+  | "PARTIALLY_APPROVED"
+  | "FULLY_APPROVED"
+  | "REJECTED";
+
+export type StagedItemStatus = "pending" | "approved" | "rejected";
+
+export interface StagedItem {
+  index: number;
+  dayId: string;
+  status: StagedItemStatus;
+  data: Record<string, unknown>;
+  validationErrors: string[];
+}
+
+export interface SheetSummary {
+  sheetName: string;
+  totalItems: number;
+  pendingCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+}
+
+export interface StagedUploadSummary {
+  totalItems: number;
+  pendingApproval: number;
+  approved: number;
+  rejected: number;
+}
+
+export interface StagedUpload {
+  _id: string;
+  fileName: string;
+  fileSize: number;
+  uploadedAt: string;
+  uploadedBy: {
+    _id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+  };
+  status: StagedUploadStatus;
+  summary: StagedUploadSummary;
+  parseErrors: string[];
+  sheets: {
+    memoryVerses: SheetSummary & { items: StagedItem[] };
+    keyLessons: SheetSummary & { items: StagedItem[] };
+    quizzes_5_8: SheetSummary & { items: StagedItem[] };
+    quizzes_9_12: SheetSummary & { items: StagedItem[] };
+    childrenDevotionals: SheetSummary & { items: StagedItem[] };
+    adultDevotionals: SheetSummary & { items: StagedItem[] };
+  };
+  relationships: DayRelationship[];
+}
+
+export interface StagedUploadResponse {
+  uploadId: string;
+  fileName: string;
+  summary: StagedUploadSummary;
+  parseErrors: string[];
+  sheets: {
+    memoryVerses: { totalItems: number; pendingCount: number };
+    keyLessons: { totalItems: number; pendingCount: number };
+    quizzes_5_8: { totalItems: number; pendingCount: number };
+    quizzes_9_12: { totalItems: number; pendingCount: number };
+    childrenDevotionals: { totalItems: number; pendingCount: number };
+    adultDevotionals: { totalItems: number; pendingCount: number };
+  };
+  totalDays: number;
+}
+
+export interface StagedSheetResponse {
+  sheetName: string;
+  items: StagedItem[];
+  totalItems: number;
+  pendingCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export interface DayRelationship {
+  dayId: string;
+  publishDate: string;
+  bibleReading: string;
+  items: {
+    memoryVerse_5_8?: { rowIndex: number; status: StagedItemStatus };
+    memoryVerse_9_12?: { rowIndex: number; status: StagedItemStatus };
+    keyLesson_5_8?: { rowIndex: number; status: StagedItemStatus };
+    keyLesson_9_12?: { rowIndex: number; status: StagedItemStatus };
+    quiz_5_8?: { rowIndex: number; status: StagedItemStatus };
+    quiz_9_12?: { rowIndex: number; status: StagedItemStatus };
+    childrenDevotional?: { rowIndex: number; status: StagedItemStatus };
+    adultDevotional?: { rowIndex: number; status: StagedItemStatus };
+  };
 }
 
 export const api = new ApiClient(API_URL);
