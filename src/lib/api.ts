@@ -1,10 +1,17 @@
-const API_URL = "https://planted-core-backend-service.onrender.com/api/v1";
+// const API_URL = "https://planted-core-backend-service.onrender.com/api/v1";
+const API_URL = "http://192.168.0.166:6003/api/v1";
 
 interface ApiResponse<T = unknown> {
   status: "success" | "error";
   data?: T;
   message?: string;
   details?: unknown;
+  pagination?: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
 }
 
 interface RequestOptions {
@@ -461,9 +468,7 @@ class ApiClient {
   }
 
   async getStagedUpload(uploadId: string) {
-    return this.request<StagedUpload>(
-      `/admin/bulk-upload/staged/${uploadId}`
-    );
+    return this.request<StagedUpload>(`/admin/bulk-upload/staged/${uploadId}`);
   }
 
   async getStagedUploadSummary(uploadId: string) {
@@ -492,13 +497,18 @@ class ApiClient {
     const query = new URLSearchParams();
     if (params?.page) query.set("page", params.page.toString());
     if (params?.limit) query.set("limit", params.limit.toString());
-    return this.request<{
-      relationships: DayRelationship[];
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    }>(`/admin/bulk-upload/staged/${uploadId}/relationships?${query.toString()}`);
+    // API returns relationships directly as data array, with pagination separate
+    const response = await this.request<DayRelationship[]>(
+      `/admin/bulk-upload/staged/${uploadId}/relationships?${query.toString()}`
+    );
+
+    return {
+      ...response,
+      data: {
+        relationships: response.data || [],
+        totalPages: response.pagination?.totalPages || 1,
+      },
+    };
   }
 
   async editStagedItem(
@@ -534,13 +544,14 @@ class ApiClient {
       items?: Array<{ sheet: string; rowIndex: number }>;
     }
   ) {
-    return this.request<{ approved: number; committed: number; errors: string[] }>(
-      `/admin/bulk-upload/staged/${uploadId}/approve`,
-      {
-        method: "POST",
-        body: data,
-      }
-    );
+    return this.request<{
+      approved: number;
+      committed: number;
+      errors: string[];
+    }>(`/admin/bulk-upload/staged/${uploadId}/approve`, {
+      method: "POST",
+      body: data,
+    });
   }
 
   async rejectItems(
@@ -657,6 +668,7 @@ export interface MemoryVerse {
 
 export interface Quiz {
   id: string;
+  dayId?: string;
   title: string;
   description?: string | null;
   devotionalId?: string | null;
@@ -756,7 +768,7 @@ export interface DashboardStats {
 // ============================================================================
 
 export interface KeyLesson {
-  id: string;
+  _id: string;
   dayId: string;
   publishDate: string;
   audience: "SPROUT_EXPLORER" | "TRAILBLAZER_TEEN";
@@ -782,6 +794,7 @@ export type StagedItemStatus = "pending" | "approved" | "rejected";
 export interface StagedItem {
   index: number;
   dayId: string;
+  date?: string;
   status: StagedItemStatus;
   data: Record<string, unknown>;
   validationErrors: string[];
@@ -855,19 +868,28 @@ export interface StagedSheetResponse {
   totalPages: number;
 }
 
+export interface DayRelationshipLink {
+  index: number;
+  status: StagedItemStatus;
+  reference?: string;
+  count?: number;
+  questionCount?: number;
+  title?: string;
+}
+
 export interface DayRelationship {
   dayId: string;
-  publishDate: string;
+  date: string;
   bibleReading: string;
-  items: {
-    memoryVerse_5_8?: { rowIndex: number; status: StagedItemStatus };
-    memoryVerse_9_12?: { rowIndex: number; status: StagedItemStatus };
-    keyLesson_5_8?: { rowIndex: number; status: StagedItemStatus };
-    keyLesson_9_12?: { rowIndex: number; status: StagedItemStatus };
-    quiz_5_8?: { rowIndex: number; status: StagedItemStatus };
-    quiz_9_12?: { rowIndex: number; status: StagedItemStatus };
-    childrenDevotional?: { rowIndex: number; status: StagedItemStatus };
-    adultDevotional?: { rowIndex: number; status: StagedItemStatus };
+  links: {
+    memoryVerse_5_8?: DayRelationshipLink;
+    memoryVerse_9_12?: DayRelationshipLink;
+    keyLessons_5_8?: DayRelationshipLink;
+    keyLessons_9_12?: DayRelationshipLink;
+    quiz_5_8?: DayRelationshipLink;
+    quiz_9_12?: DayRelationshipLink;
+    childrenDevotional?: DayRelationshipLink;
+    adultDevotional?: DayRelationshipLink;
   };
 }
 

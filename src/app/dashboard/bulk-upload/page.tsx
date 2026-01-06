@@ -748,6 +748,28 @@ export default function BulkUploadPage() {
       );
     }
 
+    const getLinkLabel = (key: string) => {
+      const labels: Record<string, string> = {
+        memoryVerse_5_8: "Memory Verse (5-8)",
+        memoryVerse_9_12: "Memory Verse (9-12)",
+        keyLessons_5_8: "Key Lessons (5-8)",
+        keyLessons_9_12: "Key Lessons (9-12)",
+        quiz_5_8: "Quiz (5-8)",
+        quiz_9_12: "Quiz (9-12)",
+        childrenDevotional: "Kids Devotional",
+        adultDevotional: "Adult Devotional",
+      };
+      return labels[key] || key.replace(/_/g, " ");
+    };
+
+    const getLinkDetail = (key: string, value: any) => {
+      if (value.reference) return value.reference;
+      if (value.title) return value.title;
+      if (value.count) return `${value.count} lessons`;
+      if (value.questionCount) return `${value.questionCount} questions`;
+      return `Row ${value.index + 1}`;
+    };
+
     return (
       <div className="divide-y divide-gray-200 dark:divide-dark-border">
         {relationships.map((rel) => (
@@ -764,7 +786,7 @@ export default function BulkUploadPage() {
                 )}
                 <div>
                   <p className="font-medium text-gray-900 dark:text-white">
-                    Day {rel.dayId} • {new Date(rel.publishDate).toLocaleDateString()}
+                    Day {rel.dayId} • {new Date(rel.date).toLocaleDateString()}
                   </p>
                   <p className="text-sm text-gray-500 dark:text-gray-400">{rel.bibleReading}</p>
                 </div>
@@ -774,7 +796,7 @@ export default function BulkUploadPage() {
 
             {expandedDays.has(rel.dayId) && (
               <div className="mt-4 ml-8 grid grid-cols-2 md:grid-cols-4 gap-4">
-                {Object.entries(rel.items).map(([key, value]) => {
+                {Object.entries(rel.links).map(([key, value]) => {
                   if (!value) return null;
                   return (
                     <div
@@ -782,14 +804,12 @@ export default function BulkUploadPage() {
                       className="p-3 bg-gray-50 dark:bg-dark-hover rounded-lg"
                     >
                       <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                        {key.replace(/_/g, " ")}
+                        {getLinkLabel(key)}
                       </p>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-900 dark:text-white">
-                          Row {value.rowIndex + 1}
-                        </span>
-                        {getStatusBadge(value.status)}
-                      </div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate mb-1">
+                        {getLinkDetail(key, value)}
+                      </p>
+                      {getStatusBadge(value.status)}
                     </div>
                   );
                 })}

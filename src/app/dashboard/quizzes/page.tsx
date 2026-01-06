@@ -10,8 +10,9 @@ import {
   PageLoader,
 } from "@/components/ui";
 import api, { Quiz } from "@/lib/api";
-import { getAgeGroupColor, getAgeGroupLabel } from "@/lib/utils";
+import { formatDate, getAgeGroupColor, getAgeGroupLabel } from "@/lib/utils";
 import {
+  CheckCircle,
   ChevronLeft,
   ChevronRight,
   Edit,
@@ -20,6 +21,7 @@ import {
   Plus,
   Search,
   Trash2,
+  XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -35,6 +37,7 @@ export default function QuizzesPage() {
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [viewingQuiz, setViewingQuiz] = useState<Quiz | null>(null);
   const [editingQuiz, setEditingQuiz] = useState<Quiz | null>(null);
   const [deletingQuiz, setDeletingQuiz] = useState<Quiz | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -233,7 +236,7 @@ export default function QuizzesPage() {
               <thead>
                 <tr>
                   <th>Quiz Title</th>
-                  <th>Linked Devotional</th>
+                  <th>Day ID</th>
                   <th>Audience</th>
                   <th>Questions</th>
                   <th>Passing Score</th>
@@ -256,13 +259,9 @@ export default function QuizzesPage() {
                       </div>
                     </td>
                     <td>
-                      {quiz.devotionalId ? (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
-                          📖 Linked
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-400">—</span>
-                      )}
+                      <span className="font-mono text-sm text-gray-600 dark:text-gray-400">
+                        {quiz.dayId || "—"}
+                      </span>
                     </td>
                     <td>
                       <span
@@ -284,6 +283,7 @@ export default function QuizzesPage() {
                         <button
                           className="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/10 transition-colors"
                           title="View"
+                          onClick={() => setViewingQuiz(quiz)}
                         >
                           <Eye className="w-4 h-4" />
                         </button>
@@ -353,6 +353,161 @@ export default function QuizzesPage() {
           onSubmit={handleCreateOrUpdate}
           isLoading={isSubmitting}
         />
+      </Modal>
+
+      {/* View Quiz Modal */}
+      <Modal
+        isOpen={!!viewingQuiz}
+        onClose={() => setViewingQuiz(null)}
+        title="Quiz Details"
+        size="xl"
+      >
+        {viewingQuiz && (
+          <div className="space-y-6">
+            {/* Quiz Info */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Day ID</p>
+                <p className="font-mono font-medium text-gray-900 dark:text-white">
+                  {viewingQuiz.dayId || "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Publish Date</p>
+                <p className="font-medium text-gray-900 dark:text-white">
+                  {formatDate(viewingQuiz.publishDate)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Audience</p>
+                <span className={`badge ${getAgeGroupColor(viewingQuiz.audience || "")}`}>
+                  {getAgeGroupLabel(viewingQuiz.audience || "")}
+                </span>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Status</p>
+                <span
+                  className={`px-2 py-1 rounded text-xs font-bold ${
+                    viewingQuiz.isActive
+                      ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                      : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                  }`}
+                >
+                  {viewingQuiz.isActive ? "Active" : "Draft"}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Title</p>
+                <p className="font-medium text-gray-900 dark:text-white">
+                  {viewingQuiz.title}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Passing Score</p>
+                <p className="font-medium text-gray-900 dark:text-white">
+                  {viewingQuiz.passingScore}%
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Total Points</p>
+                <p className="font-medium text-gray-900 dark:text-white">
+                  {viewingQuiz.totalPoints} pts
+                </p>
+              </div>
+            </div>
+
+            {viewingQuiz.description && (
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Description</p>
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  {viewingQuiz.description}
+                </p>
+              </div>
+            )}
+
+            {/* Questions */}
+            <div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                Questions ({viewingQuiz.questions?.length || 0})
+              </p>
+              <div className="space-y-4 max-h-96 overflow-y-auto">
+                {viewingQuiz.questions?.map((q, idx) => (
+                  <div
+                    key={idx}
+                    className="p-4 bg-gray-50 dark:bg-dark-hover rounded-lg"
+                  >
+                    <div className="flex items-start gap-3 mb-3">
+                      <span className="flex-shrink-0 w-7 h-7 flex items-center justify-center bg-primary-500 text-white rounded-full text-sm font-semibold">
+                        {idx + 1}
+                      </span>
+                      <div className="flex-1">
+                        <p className="font-medium text-gray-900 dark:text-white">
+                          {q.question}
+                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs px-2 py-0.5 bg-gray-200 dark:bg-dark-border rounded">
+                            {q.type.replace("_", " ")}
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {q.points} pts
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {q.options && q.options.length > 0 && (
+                      <div className="ml-10 space-y-2">
+                        {q.options.map((opt, optIdx) => (
+                          <div
+                            key={optIdx}
+                            className={`flex items-center gap-2 text-sm p-2 rounded ${
+                              opt === q.correctAnswer
+                                ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300"
+                                : "text-gray-600 dark:text-gray-400"
+                            }`}
+                          >
+                            {opt === q.correctAnswer ? (
+                              <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                            ) : (
+                              <XCircle className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                            )}
+                            <span>{opt}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {q.explanation && (
+                      <p className="ml-10 mt-2 text-xs text-gray-500 dark:text-gray-400 italic">
+                        {q.explanation}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 dark:border-dark-border">
+              <Button
+                variant="secondary"
+                onClick={() => setViewingQuiz(null)}
+              >
+                Close
+              </Button>
+              <Button
+                onClick={() => {
+                  setViewingQuiz(null);
+                  openEditModal(viewingQuiz);
+                }}
+              >
+                Edit
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Delete Confirmation Modal */}

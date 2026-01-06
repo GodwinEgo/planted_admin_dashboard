@@ -6,7 +6,8 @@ import {
   Baby,
   BookMarked,
   BookOpen,
-  BookText,
+  BookOpenCheck,
+  FileStack,
   HelpCircle,
   LayoutDashboard,
   LogOut,
@@ -28,10 +29,11 @@ const navigation = [
   { name: "Children", href: "/dashboard/children", icon: Baby },
   { name: "Devotionals", href: "/dashboard/devotionals", icon: BookOpen },
   { name: "Memory Verses", href: "/dashboard/memory-verses", icon: BookMarked },
+  { name: "Key Lessons", href: "/dashboard/key-lessons", icon: BookOpenCheck },
   { name: "Quizzes", href: "/dashboard/quizzes", icon: HelpCircle },
-  { name: "Stories", href: "/dashboard/stories", icon: BookText },
   { name: "Challenges", href: "/dashboard/challenges", icon: Trophy },
   { name: "Bulk Upload", href: "/dashboard/bulk-upload", icon: Upload },
+  { name: "Staged Uploads", href: "/dashboard/staged-uploads", icon: FileStack },
   { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
